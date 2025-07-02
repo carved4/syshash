@@ -7,15 +7,18 @@ a c implementation for native syscall resolution and execution on windows x64. t
 syshash provides low-level access to windows nt syscalls by:
 - parsing ntdll.dll exports directly from memory
 - resolving syscall numbers from function stubs
-- implementing indirect syscall execution
-- bypassing userland hooks through direct kernel calls
+- executing direct syscalls via inline assembly bypassing ntdll
+- executing indirect syscalls through clean ntdll stubs
+- restoring hooked ntdll functions from clean filesystem copy
 - caching resolved syscalls for performance
 
 ## features
 
 ### core capabilities
 - **syscall resolution**: automatically resolve syscall numbers for any nt* function
-- **indirect syscalls**: execute syscalls indirectly to bypass userland hooks
+- **direct syscalls**: execute syscalls directly via inline assembly bypassing ntdll entirely
+- **indirect syscalls**: execute syscalls through clean ntdll stubs to bypass hooks
+- **ntdll unhooking**: restore original syscall stubs from clean filesystem copy
 - **memory injection**: complete shellcode injection pipeline using only syscalls
 - **function enumeration**: dump all ntdll functions (syscalls + regular functions)
 - **hash-based obfuscation**: djb2 string hashing to avoid static strings
@@ -46,6 +49,12 @@ gcc -std=c11 -Wall -Wextra -O2 -m64 -DNDEBUG -s main.c -o syshash.exe -lkernel32
 # dump ntdll functions to files
 ./syshash.exe -dump
 
+# unhook ntdll and keep process running
+./syshash.exe -unhook
+
+# unhook with debug output
+./syshash.exe -unhook -debug
+
 ## or any combination of the flags :3
 ```
 
@@ -60,6 +69,15 @@ NtAllocateVirtualMemory | 0x12345678 | 24 | 0x7FFE12345678
 NtWriteVirtualMemory | 0x87654321 | 58 | 0x7FFE87654321
 ```
 
+### unhook mode
+when run with `-unhook`, the program:
+- reads clean ntdll.dll directly from the filesystem (system32)
+- manually maps the pe file sections into memory
+- copies the entire clean .text section over the hooked .text section
+- keeps the process running indefinitely for testing
+
+this restores original syscall functionality for direct calls while maintaining the ability to use indirect syscalls for additional evasion. the process remains active so you can attach debuggers or other tools to verify the unhooking was successful.
+
 ## architecture
 
 ### modules
@@ -68,6 +86,7 @@ NtWriteVirtualMemory | 0x87654321 | 58 | 0x7FFE87654321
 - **obf.c**: string hashing and obfuscation utilities  
 - **syscallresolve.c**: core peb parsing and syscall resolution
 - **syscall.c**: indirect syscall execution engine
+- **unhook.c**: ntdll unhooking via filesystem pe loading and .text section replacement
 - **dump.c**: function enumeration and file output
 - **main.c**: demonstration and testing harness
 
@@ -78,7 +97,8 @@ NtWriteVirtualMemory | 0x87654321 | 58 | 0x7FFE87654321
 3. **pe parsing**: parse export directory from memory without file access
 4. **pattern matching**: identify syscall stubs by bytecode patterns
 5. **number extraction**: extract syscall numbers from mov eax instructions
-6. **indirect execution**: call syscalls through custom assembly stubs
+6. **syscall execution**: three methods available - direct via inline assembly, indirect through clean stubs, or normal ntdll calls after unhooking
+7. **unhooking process**: load clean ntdll from filesystem and copy entire .text section to restore original function bytes
 
 ### syscall resolution process
 
@@ -94,9 +114,16 @@ uintptr_t func_addr = get_function_address(ntdll_base, func_hash);
 // 3. extract syscall number
 uint16_t syscall_num = extract_syscall_number(func_addr);
 
-// 4. execute indirectly
+// 4a. execute directly (bypasses ntdll entirely)
 uintptr_t args[] = { process, &base, 0, &size, type, protect };
-uintptr_t result = indirect_syscall(syscall_num, args, 6);
+uintptr_t result = external_syscall(syscall_num, args, 6);
+
+// 4b. execute indirectly (calls through clean syscall stub)
+uintptr_t result2 = indirect_syscall(syscall_num, args, 6);
+
+// 4c. or unhook and call ntdll functions normally
+unhook_ntdll();
+NTSTATUS status = NtAllocateVirtualMemory(process, &base, 0, &size, type, protect);
 ```
 
 ## security considerations
@@ -114,6 +141,7 @@ this tool is designed for:
 - standard syscall stub: `4c 8b d1 b8 XX XX 00 00` (mov r10,rcx; mov eax,XXXX)
 - alternative patterns: various mov eax locations within function prologue
 - hook detection: identifies jmp instructions that indicate userland hooks
+- clean stub restoration: overwrites hooked .text section with original bytes from filesystem copy
 
 ### limitations
 - windows x64 only (uses gs register for peb access)

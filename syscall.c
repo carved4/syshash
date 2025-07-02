@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <windows.h>
 #include "debug.c"
+#include "hashes.h"
 
 uint32_t get_hash(const char* str);
 uintptr_t get_module_base(uint32_t module_hash);
@@ -223,7 +224,7 @@ uintptr_t indirect_syscall(uint16_t syscall_number, uintptr_t* args, int arg_cou
         cached_syscall_addr = 0;
     }
     
-    uint32_t ntdll_hash = get_hash("ntdll.dll");
+    uint32_t ntdll_hash = MOD_NTDLL_DLL;
     uintptr_t ntdll_base = get_module_base(ntdll_hash);
     
     if (ntdll_base == 0) {

