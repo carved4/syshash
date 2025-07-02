@@ -2,6 +2,10 @@
 
 a c implementation for native syscall resolution and execution on windows x64. this is a minimal rewrite of the go library [carved4/go-native-syscall](https://github.com/carved4/go-native-syscall) 
 
+## demo pic
+![image](https://github.com/user-attachments/assets/b4f4938e-f024-47ed-87cf-077d59f7f90f)
+
+
 ## overview
 
 syshash provides low-level access to windows nt syscalls by:
