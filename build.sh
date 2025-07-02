@@ -50,7 +50,7 @@ echo -e "${GREEN}✓ Source file found: $SOURCE_FILE${NC}"
 
 # Compiler flags
 CFLAGS="-std=c11 -Wall -Wextra -O2 -m64"
-LDFLAGS="-lkernel32 -lntdll -static-libgcc"
+LDFLAGS="-lkernel32 -lntdll -ladvapi32 -static-libgcc"
 
 # Debug build option
 if [[ "$1" == "debug" ]]; then
@@ -60,6 +60,7 @@ if [[ "$1" == "debug" ]]; then
 else
     echo -e "${YELLOW}Building RELEASE version...${NC}"
     CFLAGS="$CFLAGS -DNDEBUG -s"
+    LDFLAGS="$LDFLAGS -Wl,--strip-all"
 fi
 
 # Build command
